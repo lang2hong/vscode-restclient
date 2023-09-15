@@ -43,6 +43,7 @@ REST Client allows you to send HTTP request and view the response in Visual Stud
     - File variables can reference both custom and system variables
     - Support environment switch
     - Support shared environment to provide variables that available in all environments
+    - Support environment variables can reference custom environment file
 * Generate code snippets for __HTTP request__ in languages like `Python`, `JavaScript` and more!
 * Remember Cookies for subsequent requests
 * Proxy support
@@ -611,6 +612,7 @@ For example: Define a shell environment variable in `.bashrc` or similar on wind
   }
   ```
 
+
   You can refer directly to the key (e.g. `PRODSECRET`) in the script, for example if running in the production environment
   ```http
   # Lookup PRODSECRET from local machine environment
@@ -627,7 +629,52 @@ For example: Define a shell environment variable in `.bashrc` or similar on wind
 
   `%`: Optional. If specified, treats envVarName as an extension setting environment variable, and uses the value of that for the lookup.
 
-* `{{$dotenv [%]variableName}}`: Returns the environment value stored in the [`.env`](https://github.com/motdotla/dotenv) file which exists in the same directory of your `.http` file.
+* `{{$dotenv [%]variableName}}`: Returns the environment value stored in the [`.env`,`.env.local`,`.env.production`](https://github.com/motdotla/dotenv) file which exists in the same directory or the parent directory of your `.http` file.  <br>
+    The 'local' or 'production' is from rest-client.environmentVariables or `env` of file variable . <br>
+    Priority: `.env.local` > `.env`; env of http file > rest-client.environmentVariables.{key}
+```
+├── .env.local {"USERNAME":"hello"}
+├── .env.prod {"USERNAME":"root"}
+├── .env.test {"USERNAME":"admin"}
+├── service1
+│   ├── healthcheck.http
+│   ├── items
+│   │   ├── create-item.http
+│   │   ├── delete-items.http
+│   │   ├── get-all-items.http
+│   │   └── get-items.http
+│   └── user
+│       ├── login.http
+│       ├── logout.http
+│       └── register.http
+└── service2
+```
+or
+```json
+  "rest-client.environmentVariables": {
+      "$shared": {
+          "version": "v1"
+      },
+      "local": {
+          "version": "v2",
+          "host": "localhost",
+          "secretKey": "DEVSECRET"
+      },
+      "production": {
+          "host": "example.com",
+          "secretKey" : "PRODSECRET"
+      }
+  }
+```
+example:
+```http
+  @env=local
+
+  # Use secretKey from extension environment settings to determine which local machine environment variable to use
+  GET https://{{host}}/{{version}}/values/item1?user={{$dotenv USERNAME}}
+  Authorization: {{$dotenv secretKey}}
+  ```
+
 * `{{$randomInt min max}}`: Returns a random integer between min (included) and max (excluded)
 * `{{$timestamp [offset option]}}`: Add UTC timestamp of now. You can even specify any date time based on current time in the format `{{$timestamp number option}}`, e.g., to represent 3 hours ago, simply `{{$timestamp -3 h}}`; to represent the day after tomorrow, simply `{{$timestamp 2 d}}`.
 * `{{$datetime rfc1123|iso8601|"custom format"|'custom format' [offset option]}}`: Add a datetime string in either _ISO8601_, _RFC1123_ or a custom display format. You can even specify a date time relative to the current date similar to `timestamp` like: `{{$datetime iso8601 1 y}}` to represent a year later in _ISO8601_ format. If specifying a custom format, wrap it in single or double quotes like: `{{$datetime "DD-MM-YYYY" 1 y}}`. The date is formatted using Day.js, read [here](https://day.js.org/docs/en/get-set/get#list-of-all-available-units) for information on format strings.
@@ -712,11 +759,11 @@ Rest Client extension respects the proxy settings made for Visual Studio Code (`
 ### Per-request Settings
 REST Client Extension also supports request-level settings for each independent request. The syntax is similar with the request name definition, `# @settingName [settingValue]`, a required setting name as well as the optional setting value. Available settings are listed as following:
 
-Name | Syntax    | Description
------|-----------|--------------------------------------------------------------
-note | `# @note` | Use for request confirmation, especially for critical request
-no-redirect | `# @no-redirect` | Don't follow the 3XX response as redirects
-no-cookie-jar | `# @no-cookie-jar` | Don't save cookies in the cookie jar
+Name | Syntax      | Description
+-----|-------------|--------------------------------------------------------------
+note | `# @note`   | Use for request confirmation, especially for critical request
+no-redirect | `# @no-redirect`   | Don't follow the 3XX response as redirects
+no-cookie-jar | `# @no-cookie-jar`   | Don't save cookies in the cookie jar
 
 > All the above leading `#` can be replaced with `//`
 

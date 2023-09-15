@@ -14,6 +14,8 @@ import { AadV2TokenProvider } from '../aadV2TokenProvider';
 import { HttpClient } from '../httpClient';
 import { EnvironmentVariableProvider } from './environmentVariableProvider';
 import { HttpVariable, HttpVariableContext, HttpVariableProvider } from './httpVariableProvider';
+import { EnvironmentController } from '../../controllers/environmentController';
+import { FileVariableProvider } from './fileVariableProvider';
 
 const uuidv4 = require('uuid/v4');
 
@@ -185,34 +187,69 @@ export class SystemVariableProvider implements HttpVariableProvider {
         });
     }
 
+    private async getEnvironmentName(document:TextDocument){
+        const envKey:string = "env";
+        if (await FileVariableProvider.Instance.has("env", document)) {
+            const { value, error, warning } = await FileVariableProvider.Instance.get(envKey, document);
+            if (!warning && !error) {
+                return value;
+            }
+        }
+        let { name: environmentName } = await EnvironmentController.getCurrentEnvironment();
+        if (environmentName === Constants.NoEnvironmentSelectedName) {
+            environmentName = EnvironmentController.sharedEnvironmentName;
+        }
+        if (environmentName != EnvironmentController.sharedEnvironmentName) {
+			return environmentName;
+        }
+        return undefined
+    }
+
     private registerDotenvVariable() {
         this.resolveFuncs.set(Constants.DotenvVariableName, async (name, document) => {
-            let folderPath = path.dirname(document.fileName);
-            while (!await fs.pathExists(path.join(folderPath, '.env'))) {
-                folderPath = path.join(folderPath, '..');
-                if (folderPath === path.parse(process.cwd()).root) {
-                    return { warning: ResolveWarningMessage.DotenvFileNotFound };
-                }
+            let defaultEnvFileName = ".env";
+            let customEnvFileName = defaultEnvFileName;
+            let environmentName = await this.getEnvironmentName(document);
+            if (environmentName !== undefined) {
+				customEnvFileName += "." + environmentName;
             }
-            const absolutePath = path.join(folderPath, '.env');
+            let folderPath = path.dirname(document.fileName);
+            while (!(await fs.pathExists(path.join(folderPath, customEnvFileName))) && !(await fs.pathExists(path.join(folderPath, defaultEnvFileName)))) {
+				folderPath = path.join(folderPath, "..");
+				if (folderPath === path.parse(process.cwd()).root) {
+					return { warning: ResolveWarningMessage.DotenvFileNotFound };
+				}
+            }
             const groups = this.dotenvRegex.exec(name);
             if (groups !== null && groups.length === 3) {
-                const parsed = dotenv.parse(await fs.readFile(absolutePath));
                 const [, refToggle, key] = groups;
                 let dotEnvVarName = key;
                 if (refToggle !== undefined) {
                     dotEnvVarName = await this.resolveSettingsEnvironmentVariable(key);
                 }
-                if (!(dotEnvVarName in parsed)) {
+				const customEnvFileAbsolutePath = path.join(folderPath, customEnvFileName);
+				if (await fs.pathExists(customEnvFileAbsolutePath)) {
+					const customParsed = dotenv.parse(await fs.readFile(customEnvFileAbsolutePath));
+					if (dotEnvVarName in customParsed) {
+						return { value: customParsed[dotEnvVarName] };
+					}
+				}
+                if(defaultEnvFileName === customEnvFileName){
                     return { warning: ResolveWarningMessage.DotenvVariableNotFound };
                 }
-
-                return { value: parsed[dotEnvVarName] };
+				const defaultEnvFileAbsolutePath = path.join(folderPath, defaultEnvFileName);
+				if (await fs.pathExists(defaultEnvFileAbsolutePath)) {
+					const parsed = dotenv.parse(await fs.readFile(defaultEnvFileAbsolutePath));
+				    if (dotEnvVarName in parsed) {
+						return { value: parsed[dotEnvVarName] };
+					}
+				}
+				return { warning: ResolveWarningMessage.DotenvVariableNotFound };
             }
-
             return { warning: ResolveWarningMessage.IncorrectDotenvVariableFormat };
         });
     }
+
 
     private registerAadTokenVariable() {
         this.resolveFuncs.set(Constants.AzureActiveDirectoryVariableName, (name, document, context) => {
